@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selecionador de Números (6/60) - Voz e Sons</title>
+    <!-- Carrega o Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carrega a biblioteca Tone.js para geração de som (bipes) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        /* Define a fonte Inter como padrão */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            min-height: 100vh;
+        }
+        /* Estilização da célula */
+        .number-cell {
+            width: 100%;
+            height: 40px; /* Reduzido um pouco para caber 10 colunas em telas menores */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9rem; /* Reduzido para caber mais números */
+            transition: all 0.1s ease;
+            user-select: none;
+            border: 2px solid #e5e7eb;
+            border-radius: 0.5rem;
+            cursor: pointer;
+        }
+        
+        /* Célula disponível (Padrão: branco/azul, clicável) */
+        .cell-available {
+            background-color: #ffffff;
+            color: #3b82f6;
+        }
+        .cell-available:hover {
+            background-color: #e0f2fe;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+        }
+
+        /* Célula temporariamente selecionada (Cinza claro) */
+        .cell-temp-selected {
+            background-color: #a8a8a8;
+            color: #4a4a4a;
+            cursor: default;
+            pointer-events: none;
+            border-color: #737373;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Célula PERMANENTEMENTE USADA (Cinza escuro, desabilitada permanentemente) */
+        .cell-used {
+            background-color: #4b5563;
+            color: #f3f4f6;
+            cursor: not-allowed;
+            pointer-events: none;
+            border-color: #374151;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+            opacity: 0.8;
+            transform: none !important;
+        }
+        
+        /* Estilo para a lista de jogos registrados */
+        .registered-game {
+            background-color: #ffffff;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            margin-bottom: 0.75rem;
+            font-weight: 500;
+            color: #1f2937;
+            border-left: 5px solid #10b981;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white p-6 sm:p-8 rounded-xl shadow-2xl">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800 mb-2 text-center">
+            Escolha Seus Números (6/60)
+        </h1>
+        <p class="text-center text-lg font-semibold text-red-600 mb-4">
+            Atenção: Números selecionados ficam permanentemente indisponíveis!
+        </p>
+        
+        <!-- Controles de Voz -->
+        <div class="flex flex-col sm:flex-row justify-center items-center gap-4 mb-8 p-4 bg-gray-50 rounded-lg border">
+            <button id="voice-btn" 
+                    class="px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 transition duration-150 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Clique para ativar a escuta por voz.">
+                🎙️ Ativar Microfone
+            </button>
+            <div id="voice-status" class="text-sm text-gray-700 font-medium">
+                Status: Inativo
+            </div>
+            <div id="repetition-status" class="text-xs text-gray-500 italic">
+                Repetições: 0/10
+            </div>
+        </div>
+
+        <!-- Seção de Seleção Temporária -->
+        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200 shadow-inner mb-8">
+            <p class="text-lg font-semibold text-blue-800 mb-2">
+                Números Selecionados (<span id="selected-count">0</span> de 6):
+            </p>
+            <div id="temporary-set" class="min-h-8 text-2xl font-mono text-blue-900 tracking-wider">
+                --
+            </div>
+        </div>
+
+        <!-- Container Principal da Tabela (10 Colunas) -->
+        <div id="table-container" class="grid grid-cols-10 gap-2 sm:gap-3 mb-10">
+            <!-- As células serão preenchidas por JavaScript -->
+        </div>
+        
+        <!-- Contador de Números Disponíveis -->
+        <div class="text-center text-sm font-medium text-gray-600 mb-6">
+            Números ainda disponíveis: <span id="available-count" class="font-bold text-gray-800">60</span>
+        </div>
+
+        <!-- Lista de Jogos Registrados -->
+        <div class="mt-8">
+            <h2 class="text-xl font-bold text-gray-700 mb-4 border-b pb-2">
+                Jogos Registrados
+            </h2>
+            <div id="registered-list" class="space-y-3">
+                <p id="no-games-message" class="text-gray-500 italic">Nenhum jogo registrado ainda.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Variáveis Globais de Controle ---
+        let temporarySelectedNumbers = [];
+        const permanentlyUsedNumbers = new Set();
+        const MAX_SELECTION = 6;
+        const TOTAL_NUMBERS = 60;
+        const REPETITION_LIMIT = 10;
+        let disabledRepetitionCount = 0; 
+        let ttsLoopActive = false; // NOVA: Flag para gerenciar o loop contínuo do TTS
+        
+        // Elementos DOM
+        const tableContainer = document.getElementById('table-container');
+        const temporarySetDisplay = document.getElementById('temporary-set');
+        const registeredList = document.getElementById('registered-list');
+        const selectedCountSpan = document.getElementById('selected-count');
+        const noGamesMessage = document.getElementById('no-games-message');
+        const availableCountSpan = document.getElementById('available-count');
+        const repetitionStatusDiv = document.getElementById('repetition-status');
+
+        // Elementos DOM de Voz
+        const voiceBtn = document.getElementById('voice-btn');
+        const voiceStatus = document.getElementById('voice-status');
+
+        // Variáveis de Controle de Voz e Áudio
+        let recognition;
+        let isListening = false;
+        let synth;
+        let audioContextInitialized = false;
+
+        // --- Funções Auxiliares ---
+
+        /**
+         * Embaralha um array.
+         * @param {Array} array - O array a ser embaralhado.
+         */
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        /**
+         * Atualiza o contador de números disponíveis e repetições no DOM.
+         */
+        function updateCounts() {
+            const available = TOTAL_NUMBERS - permanentlyUsedNumbers.size;
+            availableCountSpan.textContent = available;
+            repetitionStatusDiv.textContent = `Repetições: ${disabledRepetitionCount}/${REPETITION_LIMIT}`;
+            return available;
+        }
+
+        // --- Funções de Áudio (Tone.js) ---
+
+        /**
+         * Inicializa o contexto de áudio Tone.js.
+         */
+        function initAudioContext() {
+            if (audioContextInitialized || typeof Tone === 'undefined') return;
+            
+            try {
+                Tone.start(); 
+                audioContextInitialized = true;
+            } catch (e) {
+                console.error("Falha ao inicializar o contexto de áudio ou Tone.js:", e);
+            }
+        }
+
+        /**
+         * Toca um número específico de bipes.
+         * @param {number} beeps - Quantidade de bipes a tocar.
+         * @param {boolean} isFinal - Se é o som de encerramento (Ponto 5).
+         */
+        function playSound(beeps, isFinal = false) {
+            if (!audioContextInitialized) return;
+
+            const beepDuration = isFinal ? 0.2 : 0.1;
+            // Ponto 5: Frequência diferente e volume mais alto para encerramento
+            const beepFrequency = isFinal ? 300 : 500; 
+            const synthGain = isFinal ? 0.7 : 0.4; 
+            const startTime = Tone.now(); 
+
+            // Cria e configura um sintetizador temporário para o som
+            const tempSynth = new Tone.Synth({
+                 oscillator: { type: "square" },
+                 envelope: { attack: 0.005, decay: beepDuration / 2, sustain: 0.05, release: beepDuration / 2 }
+             }).toDestination();
+             // Ajusta o volume (em dB, onde 0 é o volume padrão, -6dB é mais baixo, etc.)
+             tempSynth.volume.value = Tone.gainToDb(synthGain); 
+
+            for (let i = 0; i < beeps; i++) {
+                const scheduledTime = startTime + i * (beepDuration + 0.05);
+                tempSynth.triggerAttackRelease(beepFrequency, beepDuration, scheduledTime);
+            }
+            
+            // Descarta o sintetizador após o uso para liberar recursos
+            setTimeout(() => tempSynth.dispose(), (beeps * (beepDuration + 0.05) + 0.1) * 1000);
+        }
+
+        // --- Funções de Lógica do Jogo ---
+
+        /**
+         * Adiciona classes de estado a uma célula.
+         */
+        function updateCellState(cell, stateClass) {
+            // ... (código existente) ...
+            cell.classList.remove('cell-available', 'cell-temp-selected', 'cell-used', 'hover:scale-[1.03]');
+            cell.classList.add(stateClass);
+            
+            if (stateClass === 'cell-available') {
+                cell.classList.add('hover:scale-[1.03]');
+                cell.setAttribute('title', `Clique ou Fale para selecionar`);
+            } else if (stateClass === 'cell-used') {
+                 cell.setAttribute('title', `Número já utilizado em um jogo registrado.`);
+            } else {
+                 cell.setAttribute('title', `Número temporariamente selecionado.`);
+            }
+        }
+
+        /**
+         * Atualiza a exibição do conjunto de números temporários.
+         */
+        function updateTemporaryDisplay() {
+            temporarySelectedNumbers.sort((a, b) => a - b);
+            const displayValue = temporarySelectedNumbers.length > 0 
+                ? temporarySelectedNumbers.map(n => n.toString().padStart(2, '0')).join(' - ')
+                : '--';
+            temporarySetDisplay.textContent = displayValue;
+            selectedCountSpan.textContent = temporarySelectedNumbers.length;
+        }
+
+        /**
+         * Inicializa a tabela 10x6 com os números de 1 a 60.
+         */
+        function initializeTable() {
+            for (let i = 1; i <= 60; i++) {
+                const cell = document.createElement('div');
+                cell.textContent = i.toString().padStart(2, '0');
+                cell.id = `num-${i}`;
+                cell.classList.add('number-cell', 'rounded-lg', 'shadow-md', 'transform'); 
+                cell.setAttribute('data-number', i);
+                
+                updateCellState(cell, 'cell-available');
+                
+                cell.addEventListener('click', handleCellClick);
+                tableContainer.appendChild(cell);
+            }
+            updateCounts(); 
+        }
+
+        /**
+         * Inicia a função de TTS para falar os números disponíveis aleatoriamente (Ponto 3).
+         * @param {boolean} shouldStartLoop - Se deve iniciar o loop contínuo de apresentação.
+         */
+        function speakAvailableNumbers(shouldStartLoop = true) {
+            if (window.speechSynthesis.speaking) return; // Evita sobreposição
+
+            const availableNumbersArray = [];
+            for (let i = 1; i <= TOTAL_NUMBERS; i++) {
+                // Exclui números permanentes e temporariamente selecionados
+                if (!permanentlyUsedNumbers.has(i) && !temporarySelectedNumbers.includes(i)) {
+                    availableNumbersArray.push(i);
+                }
+            }
+
+            if (availableNumbersArray.length === 0) {
+                // Se o jogo não estiver no estado final, apenas ignora
+                if (permanentlyUsedNumbers.size < TOTAL_NUMBERS) {
+                    console.log("TTS ignorado: Nenhum número disponível para falar.");
+                }
+                ttsLoopActive = false; // Garante que o loop pare
+                return;
+            }
+
+            shuffleArray(availableNumbersArray);
+
+            const numbersText = availableNumbersArray.map(n => n.toString()).join(', ');
+            const speechText = numbersText; 
+            
+            if (shouldStartLoop) {
+                ttsLoopActive = true;
+                voiceStatus.textContent = 'ASSISTENTE: Apresentação contínua ATIVA. Diga um número para parar.';
+            }
+
+            const utterance = new SpeechSynthesisUtterance(speechText);
+            utterance.lang = 'pt-BR';
+            
+            window.speechSynthesis.speak(utterance);
+
+            utterance.onend = () => {
+                if (ttsLoopActive) {
+                    // Ponto 3: Loop contínuo. Chamada recursiva após um pequeno intervalo.
+                    setTimeout(() => speakAvailableNumbers(false), 500); 
+                } else {
+                    // Restaura o status após o discurso se o loop foi interrompido
+                    if (isListening) {
+                        voiceStatus.textContent = 'Status: Microfone ATIVO - Diga os números (1 a 60).';
+                    }
+                }
+            };
+        }
+
+        /**
+         * Verifica o limite de repetição e aciona a função de TTS se for atingido (Ponto 1 e 3).
+         */
+        function checkRepetitionLimit() {
+            updateCounts();
+            if (disabledRepetitionCount >= REPETITION_LIMIT) {
+                // Ponto 1: Não zera o contador.
+                updateCounts();
+                // Ponto 3: Inicia o loop contínuo do TTS se não estiver ativo
+                if (!ttsLoopActive) {
+                    speakAvailableNumbers(true); 
+                }
+            }
+        }
+
+
+        /**
+         * Lida com a seleção de uma célula (chamada por clique ou voz).
+         */
+        function selectNumber(number, isVoice = false) {
+            initAudioContext();
+            let selectionSuccess = false;
+
+            if (number < 1 || number > 60) return false;
+            if (temporarySelectedNumbers.length >= MAX_SELECTION) return false;
+
+            // --- TRATAMENTO DE REPETIÇÃO: NÚMERO JÁ USADO ---
+            const isPermanentlyUsed = permanentlyUsedNumbers.has(number);
+            const isTemporarilySelected = temporarySelectedNumbers.includes(number);
+
+            if (isPermanentlyUsed || isTemporarilySelected) { // CORRIGIDO: isTemporariamenteSelected -> isTemporarilySelected
+                if (isVoice) {
+                    const lastSelectedIndex = temporarySelectedNumbers.length - 1;
+                    const lastSelectedNumber = temporarySelectedNumbers[lastSelectedIndex];
+                    
+                    if (isTemporarilySelected && number === lastSelectedNumber) { // CORRIGIDO: isTemporariamenteSelected -> isTemporarilySelected
+                        // Repetição imediata do último: toca o bipe, mas NÃO incrementa a repetição (melhoria anterior)
+                        playSound(1); 
+                    } else {
+                        // Repetição de um número permanente ou um número temporário mais antigo.
+                        playSound(1); 
+                        disabledRepetitionCount++;
+                        checkRepetitionLimit();
+                    }
+                }
+                return false; 
+            }
+            // --- FIM TRATAMENTO REPETIÇÃO ---
+
+            // --- SUCESSO NA SELEÇÃO ---
+            const cell = document.getElementById(`num-${number}`);
+            if (!cell) return false;
+
+            temporarySelectedNumbers.push(number);
+            updateCellState(cell, 'cell-temp-selected');
+            updateTemporaryDisplay();
+            playSound(1); // Toca 1 Bipe para seleção individual
+            selectionSuccess = true;
+
+            // Ponto 2: Interrompe o TTS se houver uma seleção bem-sucedida por voz
+            if (isVoice && selectionSuccess) {
+                 if (window.speechSynthesis.speaking || ttsLoopActive) {
+                    window.speechSynthesis.cancel();
+                    ttsLoopActive = false; // Desativa o loop contínuo
+                    voiceStatus.textContent = 'Ouvindo... (Número selecionado, apresentação interrompida)';
+                    // A apresentação só voltará se o limite de repetições for atingido novamente.
+                }
+            }
+
+            // Verifica se atingiu o limite de 6
+            if (temporarySelectedNumbers.length === MAX_SELECTION) {
+                setTimeout(addSetToList, 700);
+            }
+            return selectionSuccess;
+        }
+
+
+        /**
+         * Lida com o clique em uma célula da tabela (Mouse).
+         */
+        function handleCellClick(event) {
+            const cell = event.currentTarget;
+            const number = parseInt(cell.getAttribute('data-number'), 10);
+            selectNumber(number, false); 
+        }
+
+        /**
+         * Adiciona o jogo de 6 números à lista permanente e atualiza as células (Ponto 4).
+         */
+        function addSetToList() {
+            if (temporarySelectedNumbers.length !== MAX_SELECTION) return;
+
+            // 1. REGISTRA O JOGO COMPLETO
+            const gameNumber = registeredList.querySelectorAll('.registered-game').length + 1;
+            const gameDiv = document.createElement('div');
+            gameDiv.classList.add('registered-game');
+            const gameText = temporarySelectedNumbers.map(n => n.toString().padStart(2, '0')).join(' - ');
+            gameDiv.textContent = `Jogo ${gameNumber}: ${gameText}`;
+            registeredList.prepend(gameDiv);
+            
+            // 2. MOVE PARA O CONJUNTO PERMANENTE
+            temporarySelectedNumbers.forEach(num => {
+                permanentlyUsedNumbers.add(num);
+                const cell = document.getElementById(`num-${num}`);
+                if (cell) {
+                    updateCellState(cell, 'cell-used');
+                }
+            });
+
+            // 3. TOCA BIpe E LIMPA
+            playSound(2);
+            temporarySelectedNumbers = [];
+            updateTemporaryDisplay();
+            updateCounts();
+
+            if (noGamesMessage && noGamesMessage.parentNode) {
+                noGamesMessage.remove();
+            }
+
+            // --- Ponto 4: TRATAMENTO DE AUTO-SELEÇÃO E FINALIZAÇÃO ---
+            if (TOTAL_NUMBERS - permanentlyUsedNumbers.size === MAX_SELECTION) { 
+                
+                // 4. DESATIVA ESCUTA E TTS
+                window.speechSynthesis.cancel();
+                ttsLoopActive = false; 
+                isListening = false;
+                recognition.stop(); 
+                voiceBtn.disabled = true;
+                updateVoiceUI();
+                
+                // 5. ENCONTRA OS 6 RESTANTES E REGISTRA
+                const finalSix = [];
+                for (let i = 1; i <= TOTAL_NUMBERS; i++) {
+                    if (!permanentlyUsedNumbers.has(i)) {
+                        finalSix.push(i);
+                    }
+                }
+                
+                if (finalSix.length === MAX_SELECTION) {
+                    const finalGameNumber = registeredList.querySelectorAll('.registered-game').length + 1;
+                    const finalGameDiv = document.createElement('div');
+                    finalGameDiv.classList.add('registered-game');
+                    const finalGameText = finalSix.map(n => n.toString().padStart(2, '0')).join(' - ');
+                    finalGameDiv.textContent = `Jogo ${finalGameNumber} (AUTOMÁTICO): ${finalGameText}`;
+                    registeredList.prepend(finalGameDiv);
+
+                    finalSix.forEach(num => {
+                        permanentlyUsedNumbers.add(num);
+                        const cell = document.getElementById(`num-${num}`);
+                        if (cell) {
+                            updateCellState(cell, 'cell-used');
+                        }
+                    });
+
+                    // Limpa e atualiza o estado final
+                    temporarySelectedNumbers = [];
+                    updateTemporaryDisplay();
+                    updateCounts();
+
+                    // 6. TOCA O BIpe FINAL (Ponto 5)
+                    setTimeout(() => {
+                        playSound(3, true); // isFinal = true
+                        voiceStatus.textContent = 'Parabéns! Todos os 60 números foram escolhidos.';
+                    }, 500);
+                    
+                    return; // Fim do jogo
+                }
+            } 
+
+            // Tenta continuar a escuta de voz se estava ativa
+            if (isListening) {
+                // Reduzindo o timeout de 250ms para 100ms para melhorar a responsividade e reduzir o erro de InvalidStateError
+                setTimeout(() => {
+                    if (recognition.state !== 'recognizing') {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.warn('Falha ao reiniciar reconhecimento de voz após addSetToList:', e);
+                        }
+                    } else {
+                         console.log('Reconhecimento já em andamento, ignorando start explícito.');
+                    }
+                }, 100); // Alterado para 100ms
+            }
+        }
+
+        // --- Funções de Lógica de Voz (Web Speech API) ---
+        
+        const numberWords = {
+            'um': 1, 'dois': 2, 'três': 3, 'quatro': 4, 'cinco': 5, 'seis': 6, 'sete': 7, 
+            'oito': 8, 'nove': 9, 'dez': 10, 'onze': 11, 'doze': 12, 'treze': 13, 'catorze': 14, 
+            'quinze': 15, 'dezesseis': 16, 'dezessete': 17, 'dezoito': 18, 'dezenove': 19, 'vinte': 20,
+            'trinta': 30, 'quarenta': 40, 'cinquenta': 50, 'sessenta': 60
+        };
+
+        /**
+         * Extrai e tenta converter números de 1 a 60 a partir do texto.
+         */
+        function extractNumbersFromTranscript(transcript) {
+            const normalizedText = transcript.toLowerCase().replace(/é/g, 'e').replace(/\s+/g, ' ');
+            const foundNumbers = new Set();
+            const words = normalizedText.split(' ');
+            
+            words.forEach(word => {
+                const numAsDigit = parseInt(word, 10);
+                if (!isNaN(numAsDigit) && numAsDigit >= 1 && numAsDigit <= 60) {
+                    foundNumbers.add(numAsDigit);
+                }
+                if (numberWords[word]) {
+                    foundNumbers.add(numberWords[word]);
+                }
+            });
+            return Array.from(foundNumbers);
+        }
+
+        /**
+         * Inicializa o objeto de reconhecimento de voz.
+         */
+        function initVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                voiceStatus.textContent = 'ERRO: O reconhecimento de voz não é suportado pelo seu navegador.';
+                voiceBtn.disabled = true;
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'pt-BR';
+
+            recognition.onresult = (event) => {
+                const last = event.results.length - 1;
+                const transcript = event.results[last][0].transcript;
+                
+                voiceStatus.textContent = `Resultado: "${transcript}"`;
+                
+                const numbersToSelect = extractNumbersFromTranscript(transcript);
+                let selectedCount = 0;
+
+                numbersToSelect.forEach(num => {
+                    if (selectNumber(num, true)) { 
+                        selectedCount++;
+                    }
+                });
+
+                if (selectedCount > 0) {
+                    voiceStatus.textContent = `Ouvindo... (${selectedCount} número(s) selecionado(s))`;
+                } else {
+                     voiceStatus.textContent = `Ouvindo... (Nenhum número válido encontrado)`;
+                }
+            };
+
+            recognition.onend = () => {
+                // Se a escuta foi interrompida deliberadamente (isListening = false), não reinicia.
+                if (isListening) {
+                    // Reduzindo o timeout de 250ms para 100ms para melhorar a responsividade e reduzir o erro de InvalidStateError
+                    setTimeout(() => {
+                        if (recognition.state !== 'recognizing') {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.warn('Falha ao reiniciar reconhecimento de voz após onend:', e);
+                            }
+                        }
+                    }, 100); // Alterado para 100ms
+                } else {
+                    voiceStatus.textContent = 'Status: Inativo';
+                }
+            };
+            
+            recognition.onerror = (event) => {
+                console.error('Erro de reconhecimento de voz:', event.error);
+                if (isListening) {
+                    if (event.error === 'not-allowed') {
+                         isListening = false;
+                         updateVoiceUI();
+                         voiceStatus.textContent = 'ERRO: Permissão de microfone negada. Recarregue e permita o acesso.';
+                    } else if (event.error !== 'no-speech') { 
+                        voiceStatus.textContent = `ERRO: ${event.error}. Tentando reiniciar...`;
+                        // O reinício é delegado à função onend para evitar race conditions
+                        if (recognition.state !== 'recognizing') {
+                            try {
+                                recognition.start();
+                            } catch(e) {
+                                console.warn('Falha ao reiniciar após erro:', e);
+                            }
+                        }
+                    }
+                } else {
+                    voiceStatus.textContent = 'Status: Inativo';
+                }
+            };
+            
+            voiceBtn.addEventListener('click', toggleVoiceInput);
+        }
+
+        /**
+         * Inicia ou para a escuta de voz.
+         */
+        function toggleVoiceInput() {
+            initAudioContext();
+            
+            if (!recognition) {
+                voiceStatus.textContent = 'ERRO: O reconhecimento de voz não está pronto ou não é suportado.';
+                return;
+            }
+
+            if (isListening) {
+                isListening = false;
+                recognition.stop();
+                // Também garante que o TTS pare, caso esteja falando
+                window.speechSynthesis.cancel();
+                ttsLoopActive = false;
+            } else {
+                isListening = true;
+                try {
+                    if (recognition.state !== 'recognizing') {
+                        recognition.start();
+                        voiceStatus.textContent = 'Status: Microfone ATIVO - Diga os números (1 a 60).';
+                    } else {
+                         voiceStatus.textContent = 'Status: Já ATIVO. Aguardando comando de voz.';
+                    }
+                } catch (e) {
+                    console.warn('Recognition start failed, likely already running or restarting.', e);
+                }
+            }
+            updateVoiceUI();
+        }
+
+        /**
+         * Atualiza o texto e a aparência do botão de voz.
+         */
+        function updateVoiceUI() {
+            if (isListening) {
+                voiceBtn.textContent = '🔴 Parar Escuta';
+                voiceBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                voiceBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+            } else {
+                voiceBtn.textContent = '🎙️ Ativar Microfone';
+                voiceBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+                voiceBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            }
+        }
+
+
+        // --- Inicialização ---
+
+        window.onload = () => {
+            initializeTable();
+            initVoiceRecognition();
+            updateCounts();
+        };
+
+    </script>
+</body>
+</html>
