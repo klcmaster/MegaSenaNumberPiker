@@ -622,6 +622,7 @@
                 } else {
                      voiceStatus.textContent = `Ouvindo... (Nenhum número válido encontrado)`;
                 }
+                voiceStatus.textContent = voiceStatus.textContent + ` Último: "${transcript}"`;
             };
 
             recognition.onend = () => {
@@ -729,4 +730,5 @@
 </body>
 
 </html>
+
 
