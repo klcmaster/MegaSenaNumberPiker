@@ -529,11 +529,13 @@
             'oito': 8, 'nove': 9, 'dez': 10, 'onze': 11, 'doze': 12, 'treze': 13, 'catorze': 14, 
             'quinze': 15, 'dezesseis': 16, 'dezessete': 17, 'dezoito': 18, 'dezenove': 19, 'vinte': 20,
             'trinta': 30, 'quarenta': 40, 'cinquenta': 50, 'sessenta': 60,
-            // Adicione aqui variações comuns que a API possa retornar para "zero um", etc.
+            // Adicionando variações de "zero X" para cobrir a transcrição literal do mobile
             'zero um': 1, 'zero dois': 2, 'zero três': 3, 'zero quatro': 4,
-            'zero cinco': 5, 'zero seis': 6, 'zero sete': 7, 'zero oito': 8, 'zero nove': 9
+            'zero cinco': 5, 'zero seis': 6, 'zero sete': 7, 'zero oito': 8, 'zero nove': 9,
+            // Adicionando a forma de dígito falado para o 10
+            'dez': 10, 'um zero': 10 // 'dez' já estava, adicionamos 'um zero'
         };
-
+        
         /**
          * Extrai e tenta converter números de 1 a 60 a partir do texto,
          * tratando dígitos, palavras isoladas e a forma "zero X".
@@ -602,6 +604,20 @@
             recognition.interimResults = false;
             recognition.lang = 'pt-BR';
 
+            if (SpeechGrammarList) {
+                const numbers = Object.keys(numberWords).filter(key => key.length > 0 && !key.includes('zero') && !key.includes('um zero')); 
+                
+                // Incluímos todos os números de 1 a 60 escritos em palavras.
+                // Isso cria uma string como: "um | dois | três | ... | sessenta"
+                const grammar = '#JSGF V1.0; grammar numbers; public <number> = ' + numbers.join(' | ') + ' ;';
+                
+                const speechRecognitionList = new SpeechGrammarList();
+                // O peso (weight) 1 garante que essa gramática seja altamente considerada.
+                speechRecognitionList.addFromString(grammar, 1); 
+                
+                recognition.grammars = speechRecognitionList;
+                console.log('Gramática JSGF carregada:', grammar);
+            }
             recognition.onresult = (event) => {
                 const last = event.results.length - 1;
                 const transcript = event.results[last][0].transcript;
@@ -730,5 +746,6 @@
 </body>
 
 </html>
+
 
 
