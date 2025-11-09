@@ -533,21 +533,44 @@
 
         /**
          * Extrai e tenta converter números de 1 a 60 a partir do texto.
+         * Permitindo números de um dígito (1-9) sem a necessidade do "zero".
          */
         function extractNumbersFromTranscript(transcript) {
-            const normalizedText = transcript.toLowerCase().replace(/é/g, 'e').replace(/\s+/g, ' ');
+            const normalizedText = transcript.toLowerCase().replace(/é/g, 'e').replace(/\s+/g, ' ').trim();
             const foundNumbers = new Set();
             const words = normalizedText.split(' ');
             
+            // 1. Processar dígitos e números como palavras
             words.forEach(word => {
                 const numAsDigit = parseInt(word, 10);
+                
+                // Trata números de 1 a 60 escritos como dígitos (ex: "1", "45")
                 if (!isNaN(numAsDigit) && numAsDigit >= 1 && numAsDigit <= 60) {
                     foundNumbers.add(numAsDigit);
                 }
+                
+                // Trata números escritos como palavras (ex: "cinco", "vinte")
                 if (numberWords[word]) {
                     foundNumbers.add(numberWords[word]);
                 }
             });
+            
+            // 2. Lógica para tratar transcrições específicas de números compostos (opcional, mas robusto)
+            // Exemplo: 'vinte e um', 'trinta e cinco' (A API muitas vezes já converte, mas isso reforça)
+            for (let i = 0; i < words.length - 2; i++) {
+                if (words[i] in numberWords && words[i+1] === 'e' && words[i+2] in numberWords) {
+                    const dezena = numberWords[words[i]];
+                    const unidade = numberWords[words[i+2]];
+                    
+                    if (dezena >= 20 && dezena <= 50 && unidade >= 1 && unidade <= 9) {
+                        const compoundNumber = dezena + unidade;
+                        if (compoundNumber <= 60) {
+                            foundNumbers.add(compoundNumber);
+                        }
+                    }
+                }
+            }
+
             return Array.from(foundNumbers);
         }
 
@@ -693,4 +716,5 @@
 
     </script>
 </body>
+
 </html>
